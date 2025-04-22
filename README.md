@@ -1,5 +1,6 @@
 # fiberpoc
- POC for a Go Fiber REST API
+
+POC for a Go Fiber REST API. This POC demonstrates the useage of env vars, logging, unit testing, integration testing, deployment to a cloud provider, database migration and database seeding. Integration testing is done with a live postgres insatnce spun up in a container. I am going to try a few things to make the database setup fast for integration tests.
 
 ## Prerequisites
 
@@ -12,21 +13,27 @@
 The application uses environment variables for configuration. Create a `.env` file in the `app` directory with the following variables:
 
 ```env
-# Copy from app/.env.example
-DATABASE_URL=postgresql://user:password@localhost:5432/dbname
-PORT=3000
-ENV=development
+# Possible values "debug", "info", "warn", "error", "dpanic", "panic", "fatal"
+LOG_LEVEL=debug
+
+# Possible values true or false
+LOG_TO_FILE=true
+
+# A valid PostgreSQL url
+POSTGRESQL_URL=postgresql://user:password@localhost:5432/dbname
 ```
 
 ## Getting Started
 
 1. Clone the repository:
+
 ```bash
 git clone [repository-url]
 cd fiberpoc
 ```
 
 2. Install dependencies:
+
 ```bash
 cd app
 go mod download
@@ -34,13 +41,10 @@ cd ../common
 go mod download
 ```
 
-3. Set up the environment:
-```bash
-cp app/.env.example app/.env
-# Edit app/.env with your configuration
-```
+3. Set up the environment.
 
 4. Run the application:
+
 ```bash
 cd app/cmd
 go run main.go
@@ -49,12 +53,14 @@ go run main.go
 ## Project Components
 
 ### App Package
+
 - `handlers/`: HTTP request handlers and routing logic
 - `migrations/`: Database schema migrations
 - `seeds/`: Initial data for database seeding
-- `tests/`: Integration and end-to-end tests
+- `tests/`: Integration tests
 
 ### Common Package
+
 - `models/`: Data structures and domain models
 - `repos/`: Data access layer and repository implementations
 - `services/`: Business logic and service layer
@@ -66,11 +72,13 @@ go run main.go
 The project implements a clean dependency injection pattern that promotes:
 
 ### Interface-Driven Design
+
 - All dependencies are defined as interfaces in the `common/interfaces` package
 - This allows for loose coupling between components and easier testing
 - Implementation details are hidden behind interface contracts
 
 ### Service Layer Pattern
+
 ```go
 // Example interface definition
 type UserService interface {
@@ -82,36 +90,38 @@ type UserService interface {
 type userService struct {
     repo    interfaces.UserRepository
     logger  interfaces.Logger
-    cache   interfaces.CacheClient
 }
 
 // Constructor with dependency injection
 func NewUserService(
     repo interfaces.UserRepository,
     logger interfaces.Logger,
-    cache interfaces.CacheClient,
 ) interfaces.UserService {
     return &userService{
         repo: repo,
         logger: logger,
-        cache: cache,
     }
 }
 ```
 
 ### Testing Benefits
+
 - Mock implementations are provided in the `common/mocks` package
 - Easy to swap real implementations with mocks for unit testing
 - Enables isolated testing of individual components
+- Mocks are created from an interface using mockgen. See: [GoMock](https://github.com/uber-go/mock)
 
 ### Dependency Graph
+
 The application follows a clear dependency hierarchy:
+
 1. Handlers depend on Services
 2. Services depend on Repositories and Clients
 3. Repositories depend on Database connections
 4. All dependencies are injected at startup
 
 This structure ensures:
+
 - Clear separation of concerns
 - Testable code
 - Maintainable architecture
@@ -130,15 +140,17 @@ This structure ensures:
 ## Development
 
 ### Running Tests
+
 ```bash
-cd app/tests
+cd app/
 go test ./...
 
-cd ../../common
+cd common/
 go test ./...
 ```
 
 ### Adding New Features
+
 1. Define interfaces in `common/interfaces`
 2. Implement business logic in `common/services`
 3. Add data access in `common/repos` if needed
@@ -146,24 +158,9 @@ go test ./...
 5. Update routes in `app/cmd/main.go`
 
 ### Adding New Dependencies
+
 1. Define the interface in `common/interfaces`
 2. Create the implementation in appropriate package
-3. Add mock implementation in `common/mocks`
-4. Wire up in the dependency injection container
+3. Create mock using mockgen and add implementation in `common/mocks`
+4. Wire up the dependencies in main.go
 5. Inject into required services
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-[Add your license information here]
-
-## Contact
-
-[Add your contact information here]
