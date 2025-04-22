@@ -19,3 +19,11 @@
 
 # Go workspace file
 go.work
+
+bin
+.env*
+.DS_Store
+logs
+*.pem
+__debug_bin*
+app/cert/*
