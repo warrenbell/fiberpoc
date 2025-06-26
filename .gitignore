@@ -27,3 +27,6 @@ logs
 *.pem
 __debug_bin*
 app/cert/*
+
+google-oidc.json
+
