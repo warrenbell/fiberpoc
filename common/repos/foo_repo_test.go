@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 
 	"gitlab.com/sandstone2/fiberpoc/common/mocks"
@@ -27,7 +27,7 @@ func TestFooRepo_GetFoos_Success(t *testing.T) {
 
 	// Set expectation for the mock pgx pool.
 	// Make sure the right query is called.
-	const expectedQuery = "SELECT * FROM foos;"
+	const expectedQuery = "SELECT id, name FROM foos ORDER BY id;"
 	mockPool.EXPECT().
 		Query(gomock.Any(), expectedQuery).
 		Return(mockRows, nil)
@@ -89,7 +89,7 @@ func TestFooRepo_GetFoos_Error(t *testing.T) {
 	// Set expectation for the mock pgx pool.
 	// Make sure the right query is called.
 	mockPool.EXPECT().
-		Query(gomock.Any(), "SELECT * FROM foos;").
+		Query(gomock.Any(), "SELECT id, name FROM foos ORDER BY id;").
 		Return(mockRows, errors.New("query failed"))
 
 	logger := zaptest.NewLogger(t)
@@ -102,7 +102,7 @@ func TestFooRepo_GetFoos_Error(t *testing.T) {
 
 	// 2) Test mockRows.Scan failed
 	mockPool.EXPECT().
-		Query(gomock.Any(), "SELECT * FROM foos;").
+		Query(gomock.Any(), "SELECT id, name FROM foos ORDER BY id;").
 		Return(mockRows, nil)
 
 	mockRows.EXPECT().Next().Return(true)
@@ -119,7 +119,7 @@ func TestFooRepo_GetFoos_Error(t *testing.T) {
 
 	// 3) Test mockRows.Err failed
 	mockPool.EXPECT().
-		Query(gomock.Any(), "SELECT * FROM foos;").
+		Query(gomock.Any(), "SELECT id, name FROM foos ORDER BY id;").
 		Return(mockRows, nil)
 
 	// Set expectations for the mock pgx rows.
@@ -151,68 +151,86 @@ func TestFooRepo_CreateFoo_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Create the mock pool
+	// Create the mock pgx pool
 	mockPool := mocks.NewMockPgxPool(ctrl)
 
-	// Set expectation for the mock pgx pool.
-	// Make sure the right insert is called.
-	const insertSQL = "INSERT INTO foos (name) VALUES ($1);"
+	// Create the mock Row
+	mockRow := mocks.NewMockPgxRow(ctrl)
+
+	// Set up the expected query
 	mockPool.EXPECT().
-		Exec(
+		QueryRow(
 			gomock.Any(),
-			insertSQL,
-			gomock.Any(),
+			"INSERT INTO foos (name) VALUES ($1) RETURNING id, name;",
+			"Test Foo",
 		).
-		Return(pgconn.NewCommandTag("INSERT 1"), nil)
+		Return(mockRow)
 
-	// Create the mock logger
+	// Mock the scan to populate our expected result
+	mockRow.EXPECT().
+		Scan(gomock.Any()).
+		DoAndReturn(func(dest ...any) error {
+			id := dest[0].(*int)
+			name := dest[1].(*string)
+			*id = 1
+			*name = "Test Foo"
+			return nil
+		})
+
+	// Create logger and FooRepo
 	logger := zaptest.NewLogger(t)
-
-	// Create a ne foo repo
 	fooRepo := NewFooRepository(mockPool, logger)
 
-	// Call the CreateFoo function under test.
-	rows, err := fooRepo.CreateFoo()
-	require.NoError(t, err, "CreateFoo should not return an error.")
-	require.Equal(t, int64(1), rows, "should report 1 row affected.")
+	// Act
+	foo, err := fooRepo.CreateFoo("Test Foo")
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, foo)
+	require.Equal(t, 1, foo.ID)
+	require.Equal(t, "Test Foo", foo.Name)
 }
 
 func TestFooRepo_CreateFoo_Error(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Create the mock pool
+	// Create the mock pgx pool
 	mockPool := mocks.NewMockPgxPool(ctrl)
 
-	// Simulate Exec returning an error
-	mockPool.
-		EXPECT().
-		Exec(
+	// Simulate QueryRow().Scan() returning an error
+	mockRow := mocks.NewMockPgxRow(ctrl)
+	mockPool.EXPECT().
+		QueryRow(
 			gomock.Any(),
-			"INSERT INTO foos (name) VALUES ($1);",
-			gomock.Any(),
+			"INSERT INTO foos (name) VALUES ($1) RETURNING id, name;",
+			"Bad Foo",
 		).
-		Return(pgconn.NewCommandTag("INSERT 0"), errors.New("exec failed"))
+		Return(mockRow)
+
+	mockRow.EXPECT().
+		Scan(gomock.Any(), gomock.Any()).
+		Return(errors.New("scan failed"))
 
 	logger := zaptest.NewLogger(t)
 	fooRepo := NewFooRepository(mockPool, logger)
 
 	// Call under test
-	rowsAffected, err := fooRepo.CreateFoo()
-	require.Equal(t, int64(0), rowsAffected, "should return zero rows on error")
+	foo, err := fooRepo.CreateFoo("Bad Foo")
+
+	require.Nil(t, foo)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "T5O31W", "error should be wrapped with T5O31W code")
+	require.Contains(t, err.Error(), "WOPUDO", "should wrap with correct error code")
 }
 
 func TestFooRepo_DeleteFoos_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Create the mock pool
+	// Create the mock pool interface
 	mockPool := mocks.NewMockPgxPool(ctrl)
 
-	// Set expectation for the mock pgx pool.
-	// Make sure the right delete is called.
+	// Expect the DELETE SQL call
 	mockPool.
 		EXPECT().
 		Exec(
@@ -221,23 +239,22 @@ func TestFooRepo_DeleteFoos_Success(t *testing.T) {
 		).
 		Return(pgconn.NewCommandTag("DELETE 5"), nil)
 
-	// Create the mock logger
 	logger := zaptest.NewLogger(t)
-
-	// Create a new foo repo
 	repo := NewFooRepository(mockPool, logger)
 
-	// Call the DeleteFoos function under test.
+	// Act
 	rowsAffected, err := repo.DeleteFoos()
-	require.NoError(t, err, "DeleteFoos should not error.")
-	require.Equal(t, int64(5), rowsAffected, "should report 5 rows deleted.")
+
+	// Assert
+	require.NoError(t, err, "DeleteFoos should not return error")
+	require.Equal(t, int64(5), rowsAffected, "should report 5 rows deleted")
 }
 
 func TestFooRepo_DeleteFoos_Error(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Create the mock pool
+	// Create the mock pool interface
 	mockPool := mocks.NewMockPgxPool(ctrl)
 
 	// Simulate Exec returning an error
@@ -247,13 +264,14 @@ func TestFooRepo_DeleteFoos_Error(t *testing.T) {
 			gomock.Any(),
 			"DELETE FROM foos;",
 		).
-		Return(pgconn.NewCommandTag("DELETE 0"), errors.New("exec failed"))
+		Return(pgconn.CommandTag{}, errors.New("exec failed"))
 
 	logger := zaptest.NewLogger(t)
 	fooRepo := NewFooRepository(mockPool, logger)
 
 	// Call under test
 	rowsAffected, err := fooRepo.DeleteFoos()
+
 	require.Equal(t, int64(0), rowsAffected, "should return zero rows on error")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "1BLNNL", "error should be wrapped with 1BLNNL code")
@@ -263,32 +281,41 @@ func TestFooRepo_UpdateFoo_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Create the mock pool
+	// Create mocks
 	mockPool := mocks.NewMockPgxPool(ctrl)
+	mockRow := mocks.NewMockPgxRow(ctrl)
 
-	// Set expectation for the mock pgx pool.
-	// Make sure the right update is called.
-	const updateSQL = "UPDATE foos SET name = $1 WHERE id = $2;"
+	// Set expected query
 	mockPool.
 		EXPECT().
-		Exec(
+		QueryRow(
 			gomock.Any(),
-			updateSQL,
-			gomock.Any(),
-			gomock.Any(),
+			"UPDATE foos SET name = $1 WHERE id = $2 RETURNING id, name;",
+			"Updated Foo",
+			int64(1),
 		).
-		Return(pgconn.NewCommandTag("UPDATE 1"), nil)
+		Return(mockRow)
 
-	// Create the mock logger
+	// Simulate Scan populating values
+	mockRow.EXPECT().
+		Scan(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(dest ...any) error {
+			*(dest[0].(*int)) = 1
+			*(dest[1].(*string)) = "Updated Foo"
+			return nil
+		})
+
 	logger := zaptest.NewLogger(t)
-
-	// Create a new foo repo
 	repo := NewFooRepository(mockPool, logger)
 
-	// Call the DeleteFoos function under test.
-	rowsAffected, err := repo.UpdateFoo(1)
-	require.NoError(t, err, "UpdateFoo should not error.")
-	require.Equal(t, int64(1), rowsAffected, "should report 1 row updated.")
+	// Act
+	foo, err := repo.UpdateFoo(1, "Updated Foo")
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, foo)
+	require.Equal(t, 1, foo.ID)
+	require.Equal(t, "Updated Foo", foo.Name)
 }
 
 func TestFooRepo_UpdateFoo_Error(t *testing.T) {
@@ -296,23 +323,32 @@ func TestFooRepo_UpdateFoo_Error(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockPool := mocks.NewMockPgxPool(ctrl)
+	mockRow := mocks.NewMockPgxRow(ctrl)
 
-	// Simulate Exec returning an error for the update
+	// Simulate QueryRow().Scan() returning an error
 	mockPool.
 		EXPECT().
-		Exec(
+		QueryRow(
 			gomock.Any(),
-			"UPDATE foos SET name = $1 WHERE id = $2;",
-			gomock.Any(),
-			gomock.Any(),
+			"UPDATE foos SET name = $1 WHERE id = $2 RETURNING id, name;",
+			"Bad Name",
+			int64(99),
 		).
-		Return(pgconn.NewCommandTag("UPDATE 0"), errors.New("update failed"))
+		Return(mockRow)
+
+	mockRow.
+		EXPECT().
+		Scan(gomock.Any(), gomock.Any()).
+		Return(errors.New("update failed"))
 
 	logger := zaptest.NewLogger(t)
 	repo := NewFooRepository(mockPool, logger)
 
-	rowsAffected, err := repo.UpdateFoo(1)
-	require.Equal(t, int64(0), rowsAffected, "should return zero rows on error")
+	// Act
+	foo, err := repo.UpdateFoo(99, "Bad Name")
+
+	// Assert
+	require.Nil(t, foo)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "71PVZL", "error should be wrapped with 71PVZL code")
+	require.Contains(t, err.Error(), "2H6YX9", "error should be wrapped with 2H6YX9 code")
 }

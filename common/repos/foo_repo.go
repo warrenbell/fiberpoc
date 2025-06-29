@@ -2,8 +2,9 @@ package repos
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/Pallinder/go-randomdata"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pkg/errors"
 	"gitlab.com/sandstone2/fiberpoc/common/interfaces"
@@ -13,8 +14,8 @@ import (
 
 /*
 Install mockgen with these commands:
-go get github.com/golang/mock/gomock
-go install github.com/golang/mock/mockgen
+go get go.uber.org/mock/gomock
+go install go.uber.org/mock/mockgen@latest
 
 Then create mocks for the below interface with these commands:
 mockgen \
@@ -27,9 +28,9 @@ mockgen \
 
 type FooRepoInterface interface {
 	GetFoos() (foos *[]models.Foo, err error)
-	CreateFoo() (rowsAffected int64, err error)
+	CreateFoo(name string) (foo *models.Foo, err error)
 	DeleteFoos() (rowsAffected int64, err error)
-	UpdateFoo(fooId int64) (rowsAffected int64, err error)
+	UpdateFoo(fooId int64, name string) (foo *models.Foo, err error)
 }
 
 type FooRepo struct {
@@ -44,14 +45,14 @@ func NewFooRepository(db interfaces.PgxPoolInterface, logger *zap.Logger) *FooRe
 func (fooRepo *FooRepo) GetFoos() (foos *[]models.Foo, err error) {
 	foos = &[]models.Foo{}
 
-	rows, err := (*fooRepo.db).Query(context.Background(), "SELECT * FROM foos;")
+	rows, err := (*fooRepo.db).Query(context.Background(), "SELECT id, name FROM foos ORDER BY id;")
 	if err != nil {
-		return nil, errors.Wrap(err, "Error: 30UUBR - Quering foos from db.")
+		return nil, errors.Wrap(err, "Error: 30UUBR - Quering foos from db. Error")
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var foo models.Foo
+		foo := models.Foo{}
 
 		if err := rows.Scan(&foo.ID, &foo.Name); err != nil {
 			return nil, errors.Wrap(err, "Error: YN80XB - Scanning row of foos from db.")
@@ -67,19 +68,20 @@ func (fooRepo *FooRepo) GetFoos() (foos *[]models.Foo, err error) {
 	return foos, nil
 }
 
-func (fooRepo *FooRepo) CreateFoo() (rowsAffected int64, err error) {
-	name := randomdata.SillyName()
+func (fooRepo *FooRepo) CreateFoo(name string) (foo *models.Foo, err error) {
+	foo = &models.Foo{}
+	err = (*fooRepo.db).QueryRow(
+		context.Background(),
+		"INSERT INTO foos (name) VALUES ($1) RETURNING id, name;",
+		name,
+	).Scan(&foo.ID, &foo.Name)
 
-	var result pgconn.CommandTag
-
-	result, err = (*fooRepo.db).Exec(context.Background(), "INSERT INTO foos (name) VALUES ($1);", name)
 	if err != nil {
-		return 0, errors.Wrap(err, "Error: T5O31W - Inserting foo into database.")
+		return nil, errors.Wrap(err, "Error: WOPUDO - Inserting foo into database.")
 	}
 
-	return result.RowsAffected(), nil
+	return foo, nil
 }
-
 func (fooRepo *FooRepo) DeleteFoos() (rowsAffected int64, err error) {
 	var result pgconn.CommandTag
 
@@ -91,15 +93,21 @@ func (fooRepo *FooRepo) DeleteFoos() (rowsAffected int64, err error) {
 	return result.RowsAffected(), nil
 }
 
-func (fooRepo *FooRepo) UpdateFoo(fooId int64) (rowsAffected int64, err error) {
-	name := randomdata.SillyName()
+func (fooRepo *FooRepo) UpdateFoo(fooId int64, name string) (foo *models.Foo, err error) {
+	foo = &models.Foo{}
+	err = (*fooRepo.db).QueryRow(
+		context.Background(),
+		"UPDATE foos SET name = $1 WHERE id = $2 RETURNING id, name;",
+		name,
+		fooId,
+	).Scan(&foo.ID, &foo.Name)
 
-	var result pgconn.CommandTag
-
-	result, err = (*fooRepo.db).Exec(context.Background(), "UPDATE foos SET name = $1 WHERE id = $2;", name, fooId)
 	if err != nil {
-		return 0, errors.Wrap(err, "Error: 71PVZL - Updating foo in database.")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.Wrap(err, fmt.Sprintf("Error: BATWXG - No foo found with given ID: %d", fooId))
+		}
+		return nil, errors.Wrap(err, "Error: 2H6YX9 - Updating foo in database.")
 	}
 
-	return result.RowsAffected(), nil
+	return foo, nil
 }

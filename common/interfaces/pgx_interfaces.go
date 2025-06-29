@@ -29,10 +29,12 @@ type PgxPoolInterface interface {
 
 /*
 Install mockgen with these commands:
-go get github.com/golang/mock/gomock
-go install github.com/golang/mock/mockgen
+go get go.uber.org/mock/gomock
+go install go.uber.org/mock/mockgen@latest
 
-Then create mocks for the above interfaces with these commands:
+Then create mocks for the above interfaces, the repo interfaces and services interfaces with these commands:
+Make sure you are in the common directory.
+
 mockgen \
   -destination=./mocks/mock_pgx_row.go \
   -package=mocks \
@@ -53,4 +55,20 @@ mockgen \
   -mock_names=PgxPoolInterface=MockPgxPool \
   gitlab.com/sandstone2/fiberpoc/common/interfaces \
   PgxPoolInterface
+
+mockgen \
+  -destination=./mocks/mock_foo_service.go \
+  -package=mocks \
+  -mock_names=FooServiceInterface=MockFooService \
+  gitlab.com/sandstone2/fiberpoc/common/services \
+  FooServiceInterface
+
+mockgen \
+  -destination=./mocks/mock_foo_repo.go \
+  -package=mocks \
+  -mock_names=FooRepoInterface=MockFooRepo \
+  gitlab.com/sandstone2/fiberpoc/common/repos \
+  FooRepoInterface
+
+
 */

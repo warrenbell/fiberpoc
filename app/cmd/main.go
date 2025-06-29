@@ -7,22 +7,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/caarlos0/env/v6"
-	"github.com/gofiber/fiber/v2"
-	"github.com/joho/godotenv"
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
+	fiber "github.com/gofiber/fiber/v2"
+	html "github.com/gofiber/template/html/v2"
 
 	"gitlab.com/sandstone2/fiberpoc/app/handlers"
+	"gitlab.com/sandstone2/fiberpoc/app/middleware"
+	"gitlab.com/sandstone2/fiberpoc/app/server"
+
 	"gitlab.com/sandstone2/fiberpoc/common/clients"
-	"gitlab.com/sandstone2/fiberpoc/common/models"
 	"gitlab.com/sandstone2/fiberpoc/common/repos"
 	"gitlab.com/sandstone2/fiberpoc/common/services"
 )
 
 func main() {
 	// Initialize the server.
-	db, logger, err := initServer()
+	db, logger, err := server.InitServer(".env")
 	if err != nil {
 		// Can not use logger here.
 		log.Fatalf("Error: LBTF9J - Initializing the server. Error: %v", err)
@@ -39,14 +38,26 @@ func main() {
 	fooService := services.NewFooService(fooRepo, logger)
 	fooHandler := handlers.NewFooHandler(fooService, logger)
 
+	authcService, err := services.NewAuthcService(logger)
+	if err != nil {
+		logger.Sugar().Fatalf("Error: A18S5B - Creating AuthcService. Error: %v", err)
+	}
+	authcHandler := handlers.NewAuthcHandler(authcService, logger)
+
+	engine := html.New("./templates", ".html")
+	engine.Reload(true)
 	// Create the Fiber app.
-	app := fiber.New()
+	app := fiber.New(fiber.Config{Views: engine})
 
 	// Create the routes.
-	app.Get("/foos", fooHandler.HandleGetFoos)
-	app.Post("/foo", fooHandler.HandleCreateFoo)
-	app.Delete("/foos", fooHandler.HandleDeleteFoos)
-	app.Patch("/foo", fooHandler.HandleUpdateFoo)
+
+	app.Get("/", authcHandler.HandleRoot)
+	app.Get("/login", authcHandler.HandleLogin)
+	app.Get("/callback", authcHandler.HandleOauthCallback)
+	app.Get("/foos", middleware.AuthcMiddleware(authcService.GetVerifier(), logger), fooHandler.HandleGetFoos)
+	app.Post("/foos", middleware.AuthcMiddleware(authcService.GetVerifier(), logger), fooHandler.HandleCreateFoo)
+	app.Delete("/foos", middleware.AuthcMiddleware(authcService.GetVerifier(), logger), fooHandler.HandleDeleteFoos)
+	app.Put("/foos/:id", middleware.AuthcMiddleware(authcService.GetVerifier(), logger), fooHandler.HandleUpdateFoo) // Replace all fields with new ones.
 
 	// Start the Fiber server in a separate goroutine.
 	go func(app *fiber.App) {
@@ -80,35 +91,4 @@ func main() {
 	case <-time.After(5 * time.Second):
 		log.Println("Graceful shutdown for Fiber server timed out. Forcing shutdown.")
 	}
-}
-
-func initServer() (db *clients.PgxPoolImpl, logger *zap.Logger, err error) {
-
-	// Load environment variables from .env file if present.
-	if err := godotenv.Load(); err != nil {
-		// we use log here instead of Zap because the env vars are not loaded yet
-		log.Println("No .env file found or unable to load, proceeding with environment variables already in the environment")
-	}
-
-	// Parse and validate environment variables into a config struct.
-	config := models.AppConfig{}
-	if err := env.Parse(&config); err != nil {
-		// Wrap the error
-		return nil, nil, errors.Wrap(err, "Error: YN80XB - Parsing and validating env vars")
-	}
-
-	models.GlobalConfig = &config
-
-	logger = clients.GetLogger()
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "Error: O6FSH5 - Getting logger.")
-	}
-
-	// Get the db pool.
-	db, err = clients.NewPgxPoolImpl()
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "Error: FGI573 - Getting database connection pool.")
-	}
-
-	return db, logger, nil
 }

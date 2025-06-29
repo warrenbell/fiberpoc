@@ -9,8 +9,8 @@ import (
 
 /*
 Install mockgen with these commands:
-go get github.com/golang/mock/gomock
-go install github.com/golang/mock/mockgen
+go get go.uber.org/mock/gomock
+go install go.uber.org/mock/mockgen@latest
 
 Then create mocks for the below interface with these commands:
 mockgen \
@@ -23,9 +23,9 @@ mockgen \
 
 type FooServiceInterface interface {
 	GetFoos() (foos *[]models.Foo, err error)
-	CreateFoo() (rowsAffected int64, err error)
+	CreateFoo(name string) (foo *models.Foo, err error)
 	DeleteFoos() (rowsAffected int64, err error)
-	UpdateFoo(fooId int64) (rowsAffected int64, err error)
+	UpdateFoo(fooId int64, name string) (foo *models.Foo, err error)
 }
 
 type FooService struct {
@@ -45,13 +45,13 @@ func (fooService *FooService) GetFoos() (foos *[]models.Foo, err error) {
 	return foos, nil
 }
 
-func (fooService *FooService) CreateFoo() (rowsAffected int64, err error) {
-	rowsAffected, err = (*fooService.fooRepo).CreateFoo()
+func (fooService *FooService) CreateFoo(name string) (foo *models.Foo, err error) {
+	foo, err = (*fooService.fooRepo).CreateFoo(name)
 	if err != nil {
-		return 0, errors.Wrap(err, "Error: DWA4G7 - Creating foos.")
+		return nil, errors.Wrap(err, "Error: DWA4G7 - Creating foos.")
 	}
 
-	return rowsAffected, nil
+	return foo, nil
 }
 
 func (fooService *FooService) DeleteFoos() (rowsAffected int64, err error) {
@@ -63,11 +63,11 @@ func (fooService *FooService) DeleteFoos() (rowsAffected int64, err error) {
 	return rowsAffected, nil
 }
 
-func (fooService *FooService) UpdateFoo(fooId int64) (rowsAffected int64, err error) {
-	rowsAffected, err = (*fooService.fooRepo).UpdateFoo(fooId)
+func (fooService *FooService) UpdateFoo(fooId int64, name string) (foo *models.Foo, err error) {
+	foo, err = (*fooService.fooRepo).UpdateFoo(fooId, name)
 	if err != nil {
-		return 0, errors.Wrap(err, "Error: GZNHKW - Updating foos.")
+		return nil, errors.Wrap(err, "Error: GZNHKW - Updating foos.")
 	}
 
-	return rowsAffected, nil
+	return foo, nil
 }

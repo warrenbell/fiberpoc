@@ -3,13 +3,15 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/golang/mock/gomock"
+	fiber "github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 
 	"gitlab.com/sandstone2/fiberpoc/common/mocks"
@@ -20,20 +22,14 @@ func TestFooHandler_HandleGetFoos_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// 1. Create mock service and logger
 	mockFooService := mocks.NewMockFooService(ctrl)
-
-	// Create the mock logger
 	logger := zaptest.NewLogger(t)
 
-	// 2. Instantiate handler
 	fooHandler := NewFooHandler(mockFooService, logger)
 
-	// 3. Set up a Fiber app and route
 	app := fiber.New()
 	app.Get("/foos", fooHandler.HandleGetFoos)
 
-	// 4. Stub service to return a known value
 	expected := &[]models.Foo{
 		{ID: 1, Name: "Foo One"},
 		{ID: 2, Name: "Foo Two"},
@@ -43,16 +39,14 @@ func TestFooHandler_HandleGetFoos_Success(t *testing.T) {
 		GetFoos().
 		Return(expected, nil)
 
-	// 5. Perform the HTTP request
 	request := httptest.NewRequest("GET", "/foos", nil)
 	response, err := app.Test(request, -1)
 	require.NoError(t, err)
 	defer response.Body.Close()
 
-	// 6. Assertions
 	require.Equal(t, fiber.StatusOK, response.StatusCode)
+
 	body, _ := io.ReadAll(response.Body)
-	// JSONEq ignores key order, spacing, etc.
 	require.JSONEq(t, `[{"ID":1,"Name":"Foo One"},{"ID":2,"Name":"Foo Two"}]`, string(body))
 }
 
@@ -84,77 +78,81 @@ func TestFooHandler_HandleGetFoos_Error(t *testing.T) {
 
 	require.Equal(t, fiber.StatusInternalServerError, response.StatusCode)
 	body, _ := io.ReadAll(response.Body)
-	require.JSONEq(t, `{"message":"Error J5TSGF - Getting foos in handler."}`, string(body))
+	require.JSONEq(t, `{"message":"Error J5TSGF - Getting foos in handler. Error: db failure"}`, string(body))
 }
 
 func TestFooHandler_HandleCreateFoo_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// 1. Mock the service and create handler
 	mockFooService := mocks.NewMockFooService(ctrl)
-
-	// Create the mock logger
 	logger := zaptest.NewLogger(t)
-
 	fooHandler := NewFooHandler(mockFooService, logger)
 
-	// 2. Set up Fiber and route
 	app := fiber.New()
 	app.Post("/foo", fooHandler.HandleCreateFoo)
 
-	// 3. Expect CreateFoo to be called, returning 3 rows inserted
-	mockFooService.EXPECT().
-		CreateFoo().
-		Return(int64(1), nil)
+	// Prepare the input Foo JSON
+	inputJSON := `{"Name":"New Foo"}`
+	request := httptest.NewRequest("POST", "/foo", strings.NewReader(inputJSON))
+	request.Header.Set("Content-Type", "application/json")
 
-	// 4. Perform the request
-	request := httptest.NewRequest("POST", "/foo", nil)
+	// Expected Foo to be returned from the service
+	createdFoo := &models.Foo{ID: 1, Name: "New Foo"}
+
+	// Expect CreateFoo(name) to be called with "New Foo" and return createdFoo
+	mockFooService.
+		EXPECT().
+		CreateFoo("New Foo").
+		Return(createdFoo, nil)
+
 	response, err := app.Test(request, -1)
 	require.NoError(t, err)
 	defer response.Body.Close()
 
-	// 5. Assert 200 OK and the correct JSON message
 	require.Equal(t, fiber.StatusOK, response.StatusCode)
-	body, _ := io.ReadAll(response.Body)
-	expected := `{"message":"1 foos created."}`
-	require.JSONEq(t, expected, string(body))
+
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	// The handler returns the created Foo object as JSON
+	expectedJSON := `{"ID":1,"Name":"New Foo"}`
+	require.JSONEq(t, expectedJSON, string(body))
 }
 
 func TestFooHandler_HandleCreateFoo_Error(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// 1. Mock the service and create handler
 	mockFooService := mocks.NewMockFooService(ctrl)
-
-	// Create the mock logger
 	logger := zaptest.NewLogger(t)
-
 	fooHandler := NewFooHandler(mockFooService, logger)
 
-	// 2. Set up Fiber and route
 	app := fiber.New()
 	app.Post("/foo", fooHandler.HandleCreateFoo)
 
-	// 3. Expect CreateFoo to return an error
-	mockFooService.EXPECT().
-		CreateFoo().
-		Return(int64(0), errors.New("fail"))
+	inputJSON := `{"Name":"Bad Foo"}`
+	request := httptest.NewRequest("POST", "/foo", strings.NewReader(inputJSON))
+	request.Header.Set("Content-Type", "application/json")
 
-	// 4. Perform the request
-	request := httptest.NewRequest("POST", "/foo", nil)
+	expectedErr := errors.New("fail")
+	mockFooService.
+		EXPECT().
+		CreateFoo("Bad Foo").
+		Return(nil, expectedErr)
+
 	response, err := app.Test(request, -1)
 	require.NoError(t, err)
 	defer response.Body.Close()
 
-	// 5. Assert 500 and the predefined error JSON
 	require.Equal(t, fiber.StatusInternalServerError, response.StatusCode)
-	body, _ := io.ReadAll(response.Body)
-	require.JSONEq(t,
-		`{"message":"Error QONMRA - Creating foo in handler."}`,
-		string(body),
-	)
+
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	// Your handler formats error with the err string
+	expectedMessage := fmt.Sprintf(`{"message":"Error QONMRA - Creating foo in handler. Error: %v"}`, expectedErr)
+	require.JSONEq(t, expectedMessage, string(body))
 }
 
 func TestFooHandler_HandleDeleteFoos_Success(t *testing.T) {
@@ -225,32 +223,39 @@ func TestFooHandler_HandleUpdateFoo_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// 1. Mock the service and create handler
 	mockFooService := mocks.NewMockFooService(ctrl)
 	logger := zaptest.NewLogger(t)
 	fooHandler := NewFooHandler(mockFooService, logger)
 
-	// 2. Set up Fiber and route
 	app := fiber.New()
-	app.Patch("/foo", fooHandler.HandleUpdateFoo)
+	// Use route with :id param to match handler expectations
+	app.Patch("/foo/:id", fooHandler.HandleUpdateFoo)
 
-	// 3. Expect UpdateFoo to be called with fooId=42, returning 2 rows updated
+	// Prepare request body JSON with updated Foo name
+	inputJSON := `{"Name":"Updated Foo"}`
+
+	// Expect UpdateFoo to be called with id=42 and name="Updated Foo"
+	expectedFoo := &models.Foo{ID: 42, Name: "Updated Foo"}
+
 	mockFooService.
 		EXPECT().
-		UpdateFoo(int64(42)).
-		Return(int64(1), nil)
+		UpdateFoo(int64(42), "Updated Foo").
+		Return(expectedFoo, nil)
 
-	// 4. Perform the request with ?fooId=42
-	request := httptest.NewRequest("PATCH", "/foo?fooId=42", nil)
+	request := httptest.NewRequest("PATCH", "/foo/42", strings.NewReader(inputJSON))
+	request.Header.Set("Content-Type", "application/json")
+
 	response, err := app.Test(request, -1)
 	require.NoError(t, err)
 	defer response.Body.Close()
 
-	// 5. Assert 200 OK and the correct JSON message
 	require.Equal(t, fiber.StatusOK, response.StatusCode)
-	body, _ := io.ReadAll(response.Body)
-	expected := `{"message":"1 foos updated."}`
-	require.JSONEq(t, expected, string(body))
+
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	expectedJSON := `{"ID":42,"Name":"Updated Foo"}`
+	require.JSONEq(t, expectedJSON, string(body))
 }
 
 func TestFooHandler_HandleUpdateFoo_Error(t *testing.T) {
@@ -262,25 +267,28 @@ func TestFooHandler_HandleUpdateFoo_Error(t *testing.T) {
 	fooHandler := NewFooHandler(mockFooService, logger)
 
 	app := fiber.New()
-	app.Patch("/foo", fooHandler.HandleUpdateFoo)
+	app.Patch("/foo/:id", fooHandler.HandleUpdateFoo)
 
-	// 3. Stub UpdateFoo to return an error
+	inputJSON := `{"Name":"Updated Foo"}`
+	request := httptest.NewRequest("PATCH", "/foo/42", strings.NewReader(inputJSON))
+	request.Header.Set("Content-Type", "application/json")
+
+	expectedErr := errors.New("fail")
+
 	mockFooService.
 		EXPECT().
-		UpdateFoo(int64(42)).
-		Return(int64(0), errors.New("fail"))
+		UpdateFoo(int64(42), "Updated Foo").
+		Return(nil, expectedErr)
 
-	// 4. Perform the request
-	request := httptest.NewRequest("PATCH", "/foo?fooId=42", nil)
 	response, err := app.Test(request, -1)
 	require.NoError(t, err)
 	defer response.Body.Close()
 
-	// 5. Assert 500 and the predefined error JSON
 	require.Equal(t, fiber.StatusInternalServerError, response.StatusCode)
-	body, _ := io.ReadAll(response.Body)
-	require.JSONEq(t,
-		`{"message":"Error E4LP9X - Updating foo in handler."}`,
-		string(body),
-	)
+
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	expectedMessage := fmt.Sprintf(`{"message":"Error FSYTGZ - Updating foo. Error: %v"}`, expectedErr)
+	require.JSONEq(t, expectedMessage, string(body))
 }

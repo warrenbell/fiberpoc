@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Login</title>
+  </head>
+  <body>
+    {{ if .LoggedIn }}
+    <h1>Welcome, {{ .Name }}</h1>
+    <p>Email: {{ .Email }}</p>
+    {{ else }}
+    <h1>Welcome</h1>
+    <a href="/login">Login with Google</a>
+    {{ end }} {{ if .Error }}
+    <h1>Error</h1>
+    {{ end }}
+  </body>
+</html>

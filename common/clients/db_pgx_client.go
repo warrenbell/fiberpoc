@@ -2,13 +2,13 @@ package clients
 
 import (
 	"context"
-	"os"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pkg/errors"
 	"gitlab.com/sandstone2/fiberpoc/common/interfaces"
+	"gitlab.com/sandstone2/fiberpoc/common/models"
 )
 
 // pgxPoolImpl is our production wrapper around *pgxpool.Pool.
@@ -18,7 +18,7 @@ type PgxPoolImpl struct {
 
 // NewPgxPoolImpl constructs a Pool from a real *pgxpool.Pool.
 func NewPgxPoolImpl() (*PgxPoolImpl, error) {
-	url := os.Getenv("POSTGRESQL_URL")
+	url := *models.GlobalConfig.GetPostgresUrl()
 
 	connConfig, err := pgxpool.ParseConfig(url)
 	if err != nil {
